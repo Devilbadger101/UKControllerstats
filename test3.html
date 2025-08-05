@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en" class="">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VATSIM UK Controllers</title>
+
+  <!-- Alegre Sans for headings -->
+  <link href="https://fonts.googleapis.com/css2?family=Alegreya+Sans&display=swap" rel="stylesheet" />
+  <style>
+    @font-face {
+      font-family: 'DIN1451Mittelschrift';
+      src: local('DIN 1451 Mittelschrift'), local('Arial'), local('sans-serif');
+      font-weight: normal;
+      font-style: normal;
+    }
+  </style>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            vatsimPrimary: '#25ADE3',
+            vatsimSecondary: '#17375E',
+          },
+          fontFamily: {
+            heading: ['Alegreya Sans', 'sans-serif'],
+            body: ['DIN1451Mittelschrift', 'Arial', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    body {
+      font-family: 'DIN1451Mittelschrift', Arial, sans-serif;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      font-family: 'Alegreya Sans', sans-serif;
+    }
+    .toggle-button {
+      cursor: pointer;
+      user-select: none;
+      padding: 0.5rem 1rem;
+      border-radius: 0.375rem;
+      font-weight: 600;
+      transition: background-color 0.2s;
+    }
+    .toggle-button-active {
+      background-color: #25ADE3;
+      color: white;
+    }
+    .toggle-button-inactive {
+      background-color: #e2e8f0; /* gray-200 */
+      color: #1e293b; /* gray-800 */
+    }
+    .dark .toggle-button-inactive {
+      background-color: #374151; /* gray-700 */
+      color: #d1d5db; /* gray-300 */
+    }
+  </style>
+</head>
+<body class="bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 transition-colors duration-300">
+
+  <!-- Sticky Navbar -->
+  <nav class="sticky top-0 z-50 bg-white dark:bg-gray-900 shadow-md border-b border-gray-200 dark:border-gray-800 transition-colors duration-300">
+    <div class="max-w-5xl mx-auto flex items-center justify-between px-6 py-4">
+      <h1 id="mainTitle" class="text-3xl font-heading font-bold text-vatsimPrimary">
+        VATSIM UK Controllers
+      </h1>
+      <button id="themeToggle" aria-label="Toggle Dark Mode" class="ml-4 px-4 py-2 rounded-lg bg-vatsimPrimary text-white hover:bg-vatsimSecondary transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-vatsimSecondary">
+        🌙 Dark
+      </button>
+    </div>
+  </nav>
+
+  <main class="max-w-5xl mx-auto p-6">
+    <p id="subtitle" class="text-vatsimSecondary text-center sm:text-left mb-4 text-lg font-semibold">
+      Showing controllers within VATSIM UK
+    </p>
+
+    <!-- View Mode Toggle Buttons -->
+    <div id="viewToggle" class="flex justify-center sm:justify-start gap-4 mb-6">
+      <button class="toggle-button toggle-button-active" data-view="controllers" aria-pressed="true">Controllers</button>
+      <button class="toggle-button toggle-button-inactive" data-view="airports" aria-pressed="false">Airports</button>
+      <button class="toggle-button toggle-button-inactive" data-view="auto" aria-pressed="false">Auto</button>
+    </div>
+
+    <!-- Search Bar -->
+    <div class="flex justify-center mb-8">
+      <input 
+        id="searchInput"
+        type="text"
+        placeholder="Search for a controller or airport..."
+        class="w-full sm:w-1/2 p-3 rounded-lg border border-gray-300 bg-gray-100 text-gray-900 focus:outline-none focus:ring-2 focus:ring-vatsimPrimary dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700"
+      />
+    </div>
+
+    <p id="lastUpdated" class="text-center text-gray-500 dark:text-gray-400 mb-10 font-mono"></p>
+
+    <div id="atcGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+  </main>
+
+  <script>
+    // Theme toggle logic
+    const themeToggle = document.getElementById('themeToggle');
+    const htmlEl = document.documentElement;
+
+    if (localStorage.getItem('theme') === 'dark') {
+      htmlEl.classList.add('dark');
+      themeToggle.textContent = "☀️ Light";
+    }
+
+    themeToggle.addEventListener('click', () => {
+      htmlEl.classList.toggle('dark');
+      const isDark = htmlEl.classList.contains('dark');
+      localStorage.setItem('theme', isDark ? 'dark' : 'light');
+      themeToggle.textContent = isDark ? "☀️ Light" : "🌙 Dark";
+    });
+
+    const ukAirportPrefix = "EG";
+
+    let allControllers = [];
+    let allPilots = [];
+
+    // View modes: "controllers", "airports", "auto"
+    let currentView = "controllers";
+    let autoRotateInterval = null;
+
+    const subtitleEl = document.getElementById("subtitle");
+    const searchInput = document.getElementById("searchInput");
+    const atcGrid = document.getElementById("atcGrid");
+    const viewToggle = document.getElementById("viewToggle");
+    const buttons = viewToggle.querySelectorAll("button");
+    const lastUpdatedEl = document.getElementById("lastUpdated");
+
+    // Badge color helper for controllers
+    function getBadgeColor(callsign) {
+      if (callsign.includes("GND") || callsign.includes("DEL")) return "bg-gray-500";
+      if (callsign.includes("TWR")) return "bg-vatsimPrimary";
+      if (callsign.includes("APP") || callsign.includes("DEP")) return "bg-blue-600";
+      if (callsign.includes("CTR")) return "bg-vatsimSecondary";
+      return "bg-gray-700";
+    }
+
+    // Calculate distance between two lat/lon points in km using Haversine formula
+    function distanceKm(lat1, lon1, lat2, lon2) {
+      const toRad = angle => (angle * Math.PI) / 180;
+      const R = 6371; // Earth's radius in km
+      const dLat = toRad(lat2 - lat1);
+      const dLon = toRad(lon2 - lon1);
+      const a = Math.sin(dLat / 2) ** 2 +
+                Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+                Math.sin(dLon / 2) ** 2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+
+    // Estimate time to landing (minutes) given distance (km) and groundspeed (knots)
+    function minutesToLanding(distanceKm, groundspeedKnots) {
+      if (!groundspeedKnots || groundspeedKnots === 0) return Infinity;
+      const knotsToKmPerMin = 1.852 / 60; // 1 knot = 1.852 km/h, so /60 to get km/min
+      const speedKmMin = groundspeedKnots * knotsToKmPerMin;
+      return distanceKm / speedKmMin;
+    }
+
+    // Render controllers list
+    function renderControllers(list) {
+      atcGrid.innerHTML = "";
+      if (list.length === 0) {
+        atcGrid.innerHTML = `<p class="col-span-full text-center text-gray-600 dark:text-gray-400 font-body">No controllers found.</p>`;
+        return;
+      }
+      list.forEach(atc => {
+        const badgeColor = getBadgeColor(atc.callsign);
+        const card = `
+          <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-md p-5 hover:scale-105 transition-transform duration-200">
+            <div class="flex justify-between items-center mb-2">
+              <span class="text-xl font-heading font-bold text-gray-900 dark:text-gray-100">${atc.callsign}</span>
+              <span class="${badgeColor} text-white text-xs px-2 py-1 rounded-md uppercase font-semibold">
+                ${atc.callsign.split("_").pop()}
+              </span>
+            </div>
+            <p class="text-gray-800 dark:text-gray-300 mb-1 font-body">👤 ${atc.name || "Unknown"}</p>
+            <p class="text-gray-600 dark:text-gray-400 font-body">📡 ${atc.frequency || "-"}</p>
+          </div>
+        `;
+        atcGrid.innerHTML += card;
+      });
+    }
+
+    // Render airport arrivals/departures with busy badge on departures > 25
+    function renderAirports(airportStats) {
+      atcGrid.innerHTML = "";
+
+      if (Object.keys(airportStats).length === 0) {
+        atcGrid.innerHTML = `<p class="col-span-full text-center text-gray-600 dark:text-gray-400 font-body">No airport stats available.</p>`;
+        return;
+      }
+
+      const sortedAirports = Object.entries(airportStats).sort(([,a],[,b]) => (b.arrivals + b.departures) - (a.arrivals + a.departures));
+
+      sortedAirports.forEach(([icao, stats]) => {
+        const busyBadge = stats.departures > 25
+          ? `<span class="inline-block bg-red-600 text-white text-xs px-2 py-1 rounded-md font-semibold ml-2">Busy</span>`
+          : "";
+        const card = `
+          <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-md p-5 hover:scale-105 transition-transform duration-200">
+            <div class="flex justify-between items-center mb-2">
+              <span class="text-xl font-heading font-bold text-gray-900 dark:text-gray-100">${icao}</span>
+              ${busyBadge}
+            </div>
+            <p class="text-gray-800 dark:text-gray-300 mb-1 font-body">✈️ Arrivals: ${stats.arrivals}</p>
+            <p class="text-gray-600 dark:text-gray-400 font-body">🛫 Departures: ${stats.departures}</p>
+          </div>
+        `;
+        atcGrid.innerHTML += card;
+      });
+    }
+
+    // Calculate airport stats: arrivals + departures (departures only counted if on ground)
+    // For arrivals: only count if airborne and within 90 mins of landing based on distance and groundspeed
+    function calculateAirportStats(pilots) {
+      const stats = {};
+
+      // Approximate lat/lon for UK airports used here (minimal set) - in real usage, this would come from a DB or API
+      const airportCoords = {
+        "EGLL": {lat: 51.4706, lon: -0.4619},
+        "EGKK": {lat: 51.1481, lon: 0.1903},
+        "EGSS": {lat: 51.8850, lon: 0.2350},
+        "EGGW": {lat: 51.2895, lon: -0.7990},
+        "EGMC": {lat: 53.3537, lon: -2.2749},
+        "EGCC": {lat: 53.3651, lon: -2.2727},
+        "EGSS": {lat: 51.8850, lon: 0.2350},
+        "EGWU": {lat: 52.3732, lon: -1.5147},
+        "EGMC": {lat: 53.3537, lon: -2.2749},
+        "EGPH": {lat: 55.9500, lon: -3.3725},
+        "EGPK": {lat: 56.3975, lon: -3.4419},
+        "EGPN": {lat: 55.9591, lon: -3.3704},
+        "EGPD": {lat: 55.7653, lon: -4.4247},
+        "EGPF": {lat: 55.8681, lon: -4.4331},
+        "EGNS": {lat: 55.9167, lon: -3.4361},
+        "EGXC": {lat: 51.2781, lon: 0.5224}
+      };
+
+      pilots.forEach(pilot => {
+        if (pilot.flight_plan && pilot.flight_plan.departure && pilot.flight_plan.arrival) {
+          const dep = pilot.flight_plan.departure.toUpperCase();
+          const arr = pilot.flight_plan.arrival.toUpperCase();
+
+          const groundspeed = pilot.groundspeed ?? 9999;
+          const altitude = pilot.altitude ?? 9999;
+          const onGround = groundspeed < 20 || altitude < 100;
+
+          // Count departures only if on ground and dep is UK
+          if (dep.startsWith(ukAirportPrefix) && onGround) {
+            if (!stats[dep]) stats[dep] = { arrivals: 0, departures: 0 };
+            stats[dep].departures++;
+          }
+
+          // For arrivals:
+          // Only count if arriving at UK airport, airborne (groundspeed >= 20 && altitude > 100)
+          // AND within 90 minutes to landing based on distance & groundspeed
+
+          if (arr.startsWith(ukAirportPrefix)) {
+            const airport = airportCoords[arr];
+            if (!airport) return; // skip if no coordinates known
+
+            if (groundspeed >= 20 && altitude > 100) {
+              // Calculate distance to destination airport
+              const distKm = distanceKm(pilot.latitude, pilot.longitude, airport.lat, airport.lon);
+              const minLeft = minutesToLanding(distKm, groundspeed);
+
+              if (minLeft <= 90) {
+                if (!stats[arr]) stats[arr] = { arrivals: 0, departures: 0 };
+                stats[arr].arrivals++;
+              }
+            }
+          }
+        }
+      });
+
+      return stats;
+    }
+
+    // Render based on current view
+    function render() {
+      const searchTerm = searchInput.value.trim().toLowerCase();
+
+      if (currentView === "controllers") {
+        let filtered = allControllers.filter(c => 
+          c.callsign.toLowerCase().includes(searchTerm) || (c.name && c.name.toLowerCase().includes(searchTerm))
+        );
+        renderControllers(filtered);
+        subtitleEl.textContent = `Showing controllers within VATSIM UK (${filtered.length})`;
+      } else if (currentView === "airports") {
+        const stats = calculateAirportStats(allPilots);
+        // Filter airports by search term on ICAO code
+        const filteredStats = {};
+        for (const [icao, stat] of Object.entries(stats)) {
+          if (icao.toLowerCase().includes(searchTerm)) {
+            filteredStats[icao] = stat;
+          }
+        }
+        renderAirports(filteredStats);
+        subtitleEl.textContent = `Showing airport arrivals/departures within VATSIM UK (${Object.keys(filteredStats).length})`;
+      } else if (currentView === "auto") {
+        // Auto mode: switch views every 15 seconds
+        // Initially show controllers
+        renderControllers(allControllers);
+        subtitleEl.textContent = `Showing controllers within VATSIM UK (${allControllers.length})`;
+      }
+    }
+
+    // Auto rotate views every 15 seconds
+    function startAutoRotate() {
+      let step = 0;
+      const views = ["controllers", "airports"];
+      autoRotateInterval = setInterval(() => {
+        step = (step + 1) % views.length;
+        currentView = views[step];
+
+        // Update toggle button states
+        buttons.forEach(btn => {
+          const active = btn.dataset.view === currentView;
+          btn.classList.toggle('toggle-button-active', active);
+          btn.classList.toggle('toggle-button-inactive', !active);
+          btn.setAttribute('aria-pressed', active ? "true" : "false");
+        });
+
+        render();
+      }, 15000);
+    }
+
+    // Stop auto rotate
+    function stopAutoRotate() {
+      if (autoRotateInterval) {
+        clearInterval(autoRotateInterval);
+        autoRotateInterval = null;
+      }
+    }
+
+    // Handle toggle button clicks
+    buttons.forEach(button => {
+      button.addEventListener("click", () => {
+        stopAutoRotate();
+        currentView = button.dataset.view;
+        // Update button styles & aria-pressed
+        buttons.forEach(btn => {
+          const active = btn === button;
+          btn.classList.toggle('toggle-button-active', active);
+          btn.classList.toggle('toggle-button-inactive', !active);
+          btn.setAttribute('aria-pressed', active ? "true" : "false");
+        });
+        render();
+
+        if (currentView === "auto") {
+          startAutoRotate();
+        }
+      });
+    });
+
+    // Search input debounce
+    let searchTimeout = null;
+    searchInput.addEventListener("input", () => {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => {
+        render();
+      }, 300);
+    });
+
+    // Fetch data and initialize
+    async function fetchData() {
+      try {
+        const [controllersRes, pilotsRes] = await Promise.all([
+          fetch("https://data.vatsim.net/v3/vatsim-data.json"),
+          fetch("https://data.vatsim.net/v3/vatsim-data.json")
+        ]);
+        const controllersData = await controllersRes.json();
+        const pilotsData = await pilotsRes.json();
+
+        // Filter UK controllers (callsign starts with EG* but not EGTT and controller)
+        allControllers = controllersData.controllers.filter(c =>
+          c.callsign.startsWith(ukAirportPrefix) &&
+          !c.callsign.startsWith("EGTT") &&
+          !c.callsign.includes("OBS")
+        );
+
+        allPilots = pilotsData.pilots.filter(pilot =>
+          pilot.flight_plan &&
+          pilot.flight_plan.departure &&
+          pilot.flight_plan.arrival
+        );
+
+        const now = new Date();
+        lastUpdatedEl.textContent = `Last updated: ${now.toLocaleString()}`;
+
+        render();
+
+        // If auto view selected, start auto rotate
+        if (currentView === "auto") startAutoRotate();
+
+      } catch (err) {
+        atcGrid.innerHTML = `<p class="col-span-full text-center text-red-600 dark:text-red-400 font-body">Error fetching data. Please try again later.</p>`;
+        console.error(err);
+      }
+    }
+
+    fetchData();
+
+  </script>
+</body>
+</html>
