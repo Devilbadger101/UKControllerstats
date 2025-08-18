@@ -36,32 +36,12 @@
   </script>
 
   <style>
-    body {
-      font-family: 'DIN1451Mittelschrift', Arial, sans-serif;
-    }
-    h1, h2, h3, h4, h5, h6 {
-      font-family: 'Alegreya Sans', sans-serif;
-    }
-    .toggle-button {
-      cursor: pointer;
-      user-select: none;
-      padding: 0.5rem 1rem;
-      border-radius: 0.375rem;
-      font-weight: 600;
-      transition: background-color 0.2s;
-    }
-    .toggle-button-active {
-      background-color: #25ADE3;
-      color: white;
-    }
-    .toggle-button-inactive {
-      background-color: #e2e8f0; /* gray-200 */
-      color: #1e293b; /* gray-800 */
-    }
-    .dark .toggle-button-inactive {
-      background-color: #374151; /* gray-700 */
-      color: #d1d5db; /* gray-300 */
-    }
+    body { font-family: 'DIN1451Mittelschrift', Arial, sans-serif; }
+    h1, h2, h3, h4, h5, h6 { font-family: 'Alegreya Sans', sans-serif; }
+    .toggle-button { cursor: pointer; user-select: none; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: 600; transition: background-color 0.2s; }
+    .toggle-button-active { background-color: #25ADE3; color: white; }
+    .toggle-button-inactive { background-color: #e2e8f0; color: #1e293b; }
+    .dark .toggle-button-inactive { background-color: #374151; color: #d1d5db; }
   </style>
 </head>
 <body class="bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100 transition-colors duration-300">
@@ -123,7 +103,9 @@
       themeToggle.textContent = isDark ? "☀️ Light" : "🌙 Dark";
     });
 
+    // Prefixes / globals
     const ukAirportPrefix = "EG";
+    const controllerPrefixes = ["EG", "LON", "MAN", "LTC", "STC", "THAMES", "ESSEX", "SCO"];
 
     let allControllers = [];
     let allPilots = [];
@@ -162,11 +144,11 @@
     }
 
     // Estimate time to landing (minutes) given distance (km) and groundspeed (knots)
-    function minutesToLanding(distanceKm, groundspeedKnots) {
+    function minutesToLanding(distanceKmVal, groundspeedKnots) {
       if (!groundspeedKnots || groundspeedKnots === 0) return Infinity;
       const knotsToKmPerMin = 1.852 / 60; // 1 knot = 1.852 km/h, so /60 to get km/min
       const speedKmMin = groundspeedKnots * knotsToKmPerMin;
-      return distanceKm / speedKmMin;
+      return distanceKmVal / speedKmMin;
     }
 
     // Render controllers list
@@ -223,12 +205,13 @@
       });
     }
 
-    // Calculate airport stats: arrivals + departures (departures only counted if on ground)
-    // For arrivals: only count if airborne and within 90 mins of landing based on distance and groundspeed
+    // ✅ Original airport logic restored:
+    // - Departures counted only if aircraft is on ground at a UK airport
+    // - Arrivals counted only if inbound to a UK airport, airborne, and within 90 minutes based on distance & groundspeed
     function calculateAirportStats(pilots) {
       const stats = {};
 
-      // Approximate lat/lon for UK airports used here (minimal set) - in real usage, this would come from a DB or API
+      // (Kept as in your original; includes some duplicates which you can clean later if you like)
       const airportCoords = {
         "EGLL": {lat: 51.4706, lon: -0.4619},
         "EGKK": {lat: 51.1481, lon: 0.1903},
@@ -266,15 +249,14 @@
           // For arrivals:
           // Only count if arriving at UK airport, airborne (groundspeed >= 20 && altitude > 100)
           // AND within 90 minutes to landing based on distance & groundspeed
-
           if (arr.startsWith(ukAirportPrefix)) {
             const airport = airportCoords[arr];
             if (!airport) return; // skip if no coordinates known
 
             if (groundspeed >= 20 && altitude > 100) {
               // Calculate distance to destination airport
-              const distKm = distanceKm(pilot.latitude, pilot.longitude, airport.lat, airport.lon);
-              const minLeft = minutesToLanding(distKm, groundspeed);
+              const distKmVal = distanceKm(pilot.latitude, pilot.longitude, airport.lat, airport.lon);
+              const minLeft = minutesToLanding(distKmVal, groundspeed);
 
               if (minLeft <= 90) {
                 if (!stats[arr]) stats[arr] = { arrivals: 0, departures: 0 };
@@ -310,8 +292,7 @@
         renderAirports(filteredStats);
         subtitleEl.textContent = `Showing airport arrivals/departures within VATSIM UK (${Object.keys(filteredStats).length})`;
       } else if (currentView === "auto") {
-        // Auto mode: switch views every 15 seconds
-        // Initially show controllers
+        // Auto mode initially shows controllers
         renderControllers(allControllers);
         subtitleEl.textContent = `Showing controllers within VATSIM UK (${allControllers.length})`;
       }
@@ -377,21 +358,17 @@
     // Fetch data and initialize
     async function fetchData() {
       try {
-        const [controllersRes, pilotsRes] = await Promise.all([
-          fetch("https://data.vatsim.net/v3/vatsim-data.json"),
-          fetch("https://data.vatsim.net/v3/vatsim-data.json")
-        ]);
-        const controllersData = await controllersRes.json();
-        const pilotsData = await pilotsRes.json();
+        const res = await fetch("https://data.vatsim.net/v3/vatsim-data.json");
+        const data = await res.json();
 
-        // Filter UK controllers (callsign starts with EG* but not EGTT and controller)
-        allControllers = controllersData.controllers.filter(c =>
-          c.callsign.startsWith(ukAirportPrefix) &&
+        // Filter controllers by allowed prefixes and exclude EGTT & observers
+        allControllers = data.controllers.filter(c =>
+          controllerPrefixes.some(prefix => c.callsign.startsWith(prefix)) &&
           !c.callsign.startsWith("EGTT") &&
           !c.callsign.includes("OBS")
         );
 
-        allPilots = pilotsData.pilots.filter(pilot =>
+        allPilots = data.pilots.filter(pilot =>
           pilot.flight_plan &&
           pilot.flight_plan.departure &&
           pilot.flight_plan.arrival
@@ -412,12 +389,15 @@
     }
 
     fetchData();
-
+    setInterval(fetchData, 60000);
   </script>
-      <footer class="mt-12 text-center text-gray-500 dark:text-gray-400 font-body text-sm">
-  By Ellis Beckingham &amp; heavily helped by ChatGPT
-</footer>
+
+  <footer class="mt-12 text-center text-gray-500 dark:text-gray-400 font-body text-sm">
+    By Ellis Beckingham &amp; heavily helped by ChatGPT
+  </footer>
 </body>
 </html>
+
+
 
 
