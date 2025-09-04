@@ -375,5 +375,29 @@ async function fetchData() {
     }
 }
 
+// Dark mode toggle
+const themeToggle = document.getElementById("themeToggle");
+const htmlEl = document.documentElement;
+
+
+if (localStorage.theme === "dark") {
+    htmlEl.classList.add("dark");
+} else if (localStorage.theme === "light") {
+    htmlEl.classList.remove("dark");
+}
+
+themeToggle.addEventListener("click", () => {
+    if (htmlEl.classList.contains("dark")) {
+        htmlEl.classList.remove("dark");
+        localStorage.setItem("theme", "light");
+        themeToggle.textContent = "🌙 Dark";
+    } else {
+        htmlEl.classList.add("dark");
+        localStorage.setItem("theme", "dark");
+        themeToggle.textContent = "☀️ Light";
+    }
+});
+
+
 fetchData();
 setInterval(fetchData, 60000);
