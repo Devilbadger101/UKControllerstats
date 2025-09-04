@@ -31,3 +31,16 @@ h1, h2, h3, h4, h5, h6 {
     background-color: #374151; /* gray-700 */
     color: #d1d5db; /* gray-300 */
 }
+
+@font-face {
+    font-family: 'DIN1451Mittelschrift';
+    src: local('DIN 1451 Mittelschrift'), local('Arial'), local('sans-serif');
+    font-weight: normal;
+    font-style: normal;
+}
+
+/* Card animations */
+.atc-card { opacity:0; transform: translateY(10px); transition: opacity 0.4s ease, transform 0.4s ease; }
+.atc-card.show { opacity:1; transform: translateY(0); }
+#atcGrid.fade-out { opacity:0.2; transition: opacity 0.2s ease; }
+#atcGrid.fade-in { opacity:1; transition: opacity 0.4s ease; }
