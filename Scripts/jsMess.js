@@ -64,7 +64,18 @@ function renderControllers(list) {
                 ${atc.callsign.split("_").pop()}
               </span>
             </div>
-            <p class="text-gray-800 dark:text-gray-300 mb-1 font-body">👤 ${atc.name || "Unknown"}</p>
+            <p class="text-gray-800 dark:text-gray-300 mb-1 font-body">👤 ${atc.name || "Unknown"}
+<!--A link below creates a link to statsim from someones CID. This appears next to the name of the controller-->
+            <a
+            href="https://statsim.net/atc/vatsimid/?vatsimid=${atc.cid}"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="text-vatsimPrimary hover:text-vatsimSecondary underline text-sm ml-1"
+            >
+            (CID: ${atc.cid})
+            
+            </a>
+            </p>
             <p class="text-gray-600 dark:text-gray-400 font-body">📡 ${atc.frequency || "-"}</p>
           </div>
         `;
